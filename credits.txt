@@ -1,0 +1,20 @@
+cough: https://freesound.org/people/OwlStorm/sounds/151217/
+sneeze: https://freesound.org/people/SoundCollectah/sounds/167642/
+clap: https://freesound.org/people/steeltowngaming/sounds/537735/
+snap: https://freesound.org/people/lafashion/sounds/361770/
+chew: https://freesound.org/people/InspectorJ/sounds/429597/
+wind: https://freesound.org/people/ec36power/sounds/640631/
+waves: https://freesound.org/people/DerrickMckinnon/sounds/747036/
+rain: https://freesound.org/people/mlaramie/sounds/193875/
+thunder: https://freesound.org/people/InspectorJ/sounds/321654/
+campfire: https://freesound.org/people/Dynamicell/sounds/17554/
+pig: https://freesound.org/people/TheGreenEyedGhost/sounds/707789/
+cow: https://freesound.org/people/spurioustransients/sounds/513565/
+sheep: https://freesound.org/people/michaelperfect/sounds/710300/
+dog: https://freesound.org/people/SpaceJoe/sounds/483190/
+bird: https://macaulaylibrary.org/asset/241076151
+car: https://freesound.org/people/TimoSchmied/sounds/530965/
+toy plane: https://freesound.org/people/domiscz/sounds/461726/
+toilet: recorded
+microwave: https://freesound.org/people/thesewak/sounds/742793/
+train: https://freesound.org/people/FunWithSound/sounds/591874/
