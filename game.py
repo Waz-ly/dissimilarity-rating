@@ -10,6 +10,8 @@ from CONFIG import (
     BREAK_INTERVAL,
     BREAK_DURATION_SECONDS,
     PREVIEW_GAP_SECONDS,
+    TEST_STIMULI_COUNT,
+    TEST_BREAK_INTERVAL,
 )
 
 class GameInformation:
@@ -21,16 +23,17 @@ class GameInformation:
             for f in sorted(os.listdir(stimuli_dir))
             if not f.startswith(".")
         ]
-        n = len(self.stimuli)
+        self.break_interval = BREAK_INTERVAL
+        self.test_mode = False
 
-        self.songOrder = [[i, j] for i in range(n) for j in range(i)]
-        for pair in self.songOrder:
-            random.shuffle(pair)  # randomize which sound is A / B
-        random.shuffle(self.songOrder)
+        # The pair order is built when the experiment starts (see
+        # Game.start_preview). Until then the matrix is empty, so closing the
+        # window early still saves an all-zero matrix.
+        self.songOrder = []
+        self.similarityArray = np.zeros((len(self.stimuli), len(self.stimuli)))
 
         self.testing_completed = False
         self.pair_number = 0
-        self.similarityArray = np.zeros((n, n))
         self.similarityScore = float(SENTIMENT_INITIAL)
 
         self.rated = False
@@ -44,6 +47,21 @@ class GameInformation:
         self.preview_started = False
         self.preview_index = 0
         self.break_remaining = 0.0
+
+    def _build_trials(self):
+        """(Re)build the shuffled pair order and the ratings matrix."""
+        n = len(self.stimuli)
+        self.songOrder = [[i, j] for i in range(n) for j in range(i)]
+        for pair in self.songOrder:
+            random.shuffle(pair)  # randomize which sound is A / B
+        random.shuffle(self.songOrder)
+        self.similarityArray = np.zeros((n, n))
+
+    def enable_test_mode(self):
+        """Use only the first few clips and offer breaks more often."""
+        self.test_mode = True
+        self.stimuli = self.stimuli[:TEST_STIMULI_COUNT]
+        self.break_interval = TEST_BREAK_INTERVAL
 
 
 class Game:
@@ -77,10 +95,14 @@ class Game:
         return True
 
     # ---------------- preview phase ----------------
-    def start_preview(self):
+    def start_preview(self, test_mode=False):
+        """Begin the experiment. In test mode: 3 clips, a break every 2 pairs."""
         info = self.gameInfo
         if info.phase == "preview" and not info.preview_started:
+            if test_mode:
+                info.enable_test_mode()
             info.preview_started = True
+            info._build_trials()
             if info.stimuli:
                 self._play_preview_current()
             else:
@@ -101,7 +123,7 @@ class Game:
     # ---------------- break phase ----------------
     def _maybe_start_break(self):
         info = self.gameInfo
-        if info.pair_number > 0 and info.pair_number % BREAK_INTERVAL == 0:
+        if info.pair_number > 0 and info.pair_number % info.break_interval == 0:
             info.phase = "break"
             self._break_started_at = time.time()
             info.break_remaining = BREAK_DURATION_SECONDS

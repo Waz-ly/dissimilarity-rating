@@ -21,9 +21,14 @@ PAIR_NUMBER_FONT = ("Helvetica", 9)
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-STIMULI_DIR = "./sounds"
-ASSETS_DIR = "./assets"
-OUTPUT_FILE = "./data/dissimilarity_matrix.txt"
+import sys, os
+
+def _bundle_dir():
+    """Where bundled (--add-data) files live."""
+    return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+
+STIMULI_DIR = os.path.join(_bundle_dir(), "sounds")
+ASSETS_DIR  = os.path.join(_bundle_dir(), "assets")
 
 # ---------------------------------------------------------------------------
 # Rating scale
@@ -62,6 +67,22 @@ NEXT_X_FRAC = 0.85
 NEXT_Y_FRAC = 0.05
 NEXT_WIDTH_FRAC = 0.10
 NEXT_HEIGHT_FRAC = 0.08
+
+# Test mode (the "Test" button on the initial screen)
+TEST_STIMULI_COUNT = 3         # only the first N clips (alphabetical) are used
+TEST_BREAK_INTERVAL = 2        # offer a break every N completed pairs
+
+# Initial screen: "Choose save file" button, Start button, Test button
+FILE_BOX_WIDTH_FRAC = 0.30
+FILE_BOX_HEIGHT_FRAC = 0.08
+FILE_BOX_Y_FRAC = 0.35         # vertical centre of the "Choose save file" button
+START_BOX_Y_FRAC = 0.72        # vertical centre of the Start button
+TEST_BOX_X_FRAC = 0.80
+TEST_BOX_Y_FRAC = 0.90
+TEST_BOX_WIDTH_FRAC = 0.14
+TEST_BOX_HEIGHT_FRAC = 0.06
+
+DISABLED_COLOR = (90, 90, 90)  # greyed-out buttons / text
 
 # Centered button used by the preview ("Start") and break ("Continue")
 # screens.

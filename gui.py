@@ -1,5 +1,4 @@
 import os
-import subprocess
 import sys
 import traceback
 
@@ -11,54 +10,58 @@ from CONFIG import *
 
 pygame.font.init()
 
+def create_dialog_root():
+    """Create the (hidden) Tk root used for file dialogs.
 
-_SAVE_DIALOG_SCRIPT = """
-import sys
-import tkinter as tk
-from tkinter import filedialog
-
-root = tk.Tk()
-root.withdraw()
-root.attributes("-topmost", True)
-path = filedialog.asksaveasfilename(
-    title="Choose where to save the dissimilarity matrix",
-    initialdir=sys.argv[1],
-    initialfile=sys.argv[2],
-    defaultextension=".txt",
-    filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-)
-root.destroy()
-sys.stdout.write(path)
-"""
-
-
-def choose_output_path(default_path):
-    """Show a native "save as" window and return the chosen path, or None if
-    the user cancels.
-
-    The dialog runs in a separate process so tkinter and pygame/SDL never
-    share a process (they can conflict, especially on macOS). If the dialog
-    can't be shown at all (e.g. tkinter missing), fall back to default_path.
+    Must be called BEFORE pygame.init(): Tk and SDL both want to own the
+    macOS application object, and Tk crashes if SDL got there first.
+    Returns None if tkinter is unavailable.
     """
-    default_path = os.path.abspath(default_path)
     try:
-        result = subprocess.run(
-            [sys.executable, "-c", _SAVE_DIALOG_SCRIPT,
-             os.path.dirname(default_path), os.path.basename(default_path)],
-            capture_output=True, text=True, check=True,
-        )
-    except Exception as e:
-        print(f"Could not show save dialog ({e}); saving to {default_path}")
-        return default_path
-    return result.stdout.rstrip("\r\n") or None
+        import tkinter as tk
 
+        root = tk.Tk()
+        root.withdraw()
+        root.geometry("0x0+0+0")
+        root.attributes("-alpha", 0.0)
+        return root
+    except Exception as e:
+        print(f"Could not create Tk root ({e}); save dialog unavailable")
+        return None
+
+
+def choose_output_path(root):
+    """Show a "save as" dialog. Returns the chosen path, or None if cancelled."""
+    if root is None:
+        return None
+    try:
+        from tkinter import filedialog
+
+        root.attributes("-topmost", True)
+        root.update()
+        root.lift()
+        root.focus_force()
+        path = filedialog.asksaveasfilename(
+            parent=root,
+            title="Choose where to save the dissimilarity matrix",
+            initialfile="dissimilarity_matrix.txt",
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+        )
+        return path or None
+    except Exception as e:
+        print(f"Could not show save dialog ({e})")
+        return None
+    finally:
+        root.withdraw()
 
 class SimilarityTest:
     def __init__(self, fullscreen=False):
-        # Ask where to save before any experiment window opens.
-        self.output_path = choose_output_path(OUTPUT_FILE)
-        if self.output_path is None:
-            sys.exit(0)
+        # Chosen from the initial screen; the experiment can't start without it.
+        self.output_path = None
+
+        # Tk first, pygame second (see create_dialog_root).
+        self._tk_root = create_dialog_root()
 
         pygame.init()
         pygame.display.set_caption("Dissimilarity Rating Experiment")
@@ -83,6 +86,7 @@ class SimilarityTest:
         self._resized_cache = {}
 
         self.dragging = False
+        self.test_mode = False   # toggled on the initial screen; applied on Start
         self._closed = False
         self._done = False
 
@@ -139,6 +143,18 @@ class SimilarityTest:
             "center_box": (
                 int(w / 2 - cb_w / 2), int(h * CENTER_BOX_Y_FRAC - cb_h / 2), cb_w, cb_h,
             ),
+            "start_box": (
+                int(w / 2 - cb_w / 2), int(h * START_BOX_Y_FRAC - cb_h / 2), cb_w, cb_h,
+            ),
+            "file_box": (
+                int(w / 2 - w * FILE_BOX_WIDTH_FRAC / 2),
+                int(h * FILE_BOX_Y_FRAC - h * FILE_BOX_HEIGHT_FRAC / 2),
+                int(w * FILE_BOX_WIDTH_FRAC), int(h * FILE_BOX_HEIGHT_FRAC),
+            ),
+            "test_box": (
+                int(w * TEST_BOX_X_FRAC), int(h * TEST_BOX_Y_FRAC),
+                int(w * TEST_BOX_WIDTH_FRAC), int(h * TEST_BOX_HEIGHT_FRAC),
+            ),
         }
         return self.layout
 
@@ -158,26 +174,36 @@ class SimilarityTest:
         L = self.layout
         info = self.game.gameInfo
 
-        if info.phase == "preview":
-            if not info.preview_started and self._point_in_box(x, y, *L["center_box"], pad=8):
-                return "start"
-            return None
+        match info.phase:
+            case "preview":
 
-        if info.phase == "break":
-            return "continue" if self._point_in_box(x, y, *L["center_box"], pad=8) else None
+                if info.preview_started: return None
+                if self._point_in_box(x, y, *L["file_box"], pad=8):
+                    return "choose_file"
+                # Start is locked until a save file has been chosen.
+                if self.output_path is not None and self._point_in_box(x, y, *L["start_box"], pad=8):
+                    return "start"
+                if self._point_in_box(x, y, *L["test_box"], pad=8):
+                    return "test"
+                return None
 
-        # trial phase
-        bs = L["button_size"]
-        for name in ("A", "B"):
-            if self._point_in_box(x, y, *L[f"button_{name}"], bs, bs, pad=8):
-                return f"play_{name}"
+            case "break":
 
-        if info.rated and self._point_in_box(x, y, *L["next_box"], pad=8):
-            return "next"
+                return "continue" if self._point_in_box(x, y, *L["center_box"], pad=8) else None
 
-        sx, sw = L["scale_x"], L["scale_width"]
-        if self._point_in_box(x, y, sx - sw, L["scale_y"], sw * 3, L["scale_height"]):
-            return "scale"
+            case "trial":
+
+                bs = L["button_size"]
+                for name in ("A", "B"):
+                    if self._point_in_box(x, y, *L[f"button_{name}"], bs, bs, pad=8):
+                        return f"play_{name}"
+
+                if info.rated and self._point_in_box(x, y, *L["next_box"], pad=8):
+                    return "next"
+
+                sx, sw = L["scale_x"], L["scale_width"]
+                if self._point_in_box(x, y, sx - sw, L["scale_y"], sw * 3, L["scale_height"]):
+                    return "scale"
 
         return None
 
@@ -192,19 +218,23 @@ class SimilarityTest:
                 self.on_close()
             return
 
-        if event.type == pygame.VIDEORESIZE:
-            self.on_resize((event.w, event.h))
-        elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_F11:
-                self.toggle_fullscreen()
-            elif event.key == pygame.K_ESCAPE:
-                self.exit_fullscreen()
-        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            self.on_click(event.pos)
-        elif event.type == pygame.MOUSEMOTION and self.dragging:
-            self._update_score_from_y(event.pos[1])
-        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-            self.dragging = False
+        match event.type:
+            case pygame.VIDEORESIZE:
+                self.on_resize((event.w, event.h))
+            case pygame.KEYDOWN:
+                if event.key == pygame.K_F11:
+                    self.toggle_fullscreen()
+                elif event.key == pygame.K_ESCAPE:
+                    self.exit_fullscreen()
+            case pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    self.on_click(event.pos)
+            case pygame.MOUSEMOTION:
+                if self.dragging:
+                    self._update_score_from_y(event.pos[1])
+            case pygame.MOUSEBUTTONUP:
+                if event.button == 1:
+                    self.dragging = False
 
     def on_click(self, pos):
         target = self._hit_test(*pos)
@@ -226,12 +256,28 @@ class SimilarityTest:
                 self.finish()
             return
 
+        if target == "choose_file":
+            self.choose_file()
+            return
+        if target == "test":
+            self.test_mode = not self.test_mode   # only toggles; Start begins the run
+            return
+        if target == "start":
+            game.start_preview(test_mode=self.test_mode)
+            return
+
         {
-            "start": game.start_preview,
             "continue": game.end_break,
             "play_A": game.play_A,
             "play_B": game.play_B,
         }[target]()
+
+    def choose_file(self):
+        """Open the save dialog; keep the previous choice if cancelled."""
+        path = choose_output_path(self._tk_root)
+        if path:
+            self.output_path = path
+        self.dragging = False
 
     def _update_score_from_y(self, y):
         sy, sh = self.layout["scale_y"], self.layout["scale_height"]
@@ -240,17 +286,21 @@ class SimilarityTest:
         self.game.set_similarity(9 - rel * (SENTIMENT_OPTIONS - 1))
 
     # ---------------- render helpers ----------------
-    def _draw_text(self, text, font, pos, anchor="center"):
-        surf = font.render(text, True, self.fg_color)
+    def _draw_text(self, text, font, pos, anchor="center", color=None):
+        surf = font.render(text, True, color or self.fg_color)
         rect = surf.get_rect()
         setattr(rect, anchor, (int(pos[0]), int(pos[1])))
         self.screen.blit(surf, rect)
 
-    def _draw_button_box(self, box, label):
+    def _draw_button_box(self, box, label, font=None, enabled=True, color=None):
         x, y, w, h = box
-        pygame.draw.rect(self.screen, self.fg_color, (x, y, w, h))
+        color = (self.fg_color if enabled else pygame.Color(*DISABLED_COLOR)) if color is None else color
+        pygame.draw.rect(self.screen, color, (x, y, w, h))
         pygame.draw.rect(self.screen, self.bg_color, (x + 5, y + 5, w - 10, h - 10))
-        self._draw_text(label, self.large_font, (x + w / 2, y + h / 2))
+        self._draw_text(label, font or self.large_font, (x + w / 2, y + h / 2), color=color)
+
+    def _shorten_path(self, path, max_chars=60):
+        return path if len(path) <= max_chars else "..." + path[-(max_chars - 3):]
 
     # ---------------- render ----------------
     def render(self):
@@ -273,12 +323,45 @@ class SimilarityTest:
         w, h = L["w"], L["h"]
 
         if not info.preview_started:
-            self._draw_text("Sound Preview", self.large_font, (w / 2, h * 0.35))
-            self._draw_text(
-                "First, listen to each sound once to get a sense of the range of sounds.",
-                self.small_font, (w / 2, h * 0.45),
+            ready = self.output_path is not None
+            dim = pygame.Color(*DISABLED_COLOR)
+
+            for i, line in enumerate([
+                "This experiment produces a text file with your ratings.",
+                "Please choose a file location to save your results to.",
+                "After the test is done, please email this file wesleyc@caltech.edu.",
+            ]):
+                self._draw_text(line, self.small_font, (w / 2, h * 0.20 + 20 * i))
+
+            self._draw_button_box(
+                L["file_box"],
+                "Choose save file",
+                font=self.small_font,
             )
-            self._draw_button_box(L["center_box"], "Start")
+            
+            self._draw_text(self._shorten_path(self.output_path) if ready else "No file selected", self.small_font, (w / 2, h * 0.43), color=dim)
+
+            for i, line in enumerate([
+                "In this experiment, you will be asked to rate the dissimilarity of pairs of sounds.",
+                "There are 20 total sounds which you will listen to before beginning the experiment.",
+                "Then you will rate the dissimilarity of the audio pairs (190 in total) from 1-9,",
+                "dissimilarity meaning whatever it most intuitively means to you.",
+                "Try to use the full range of the scale."
+            ]):
+                self._draw_text(line, self.small_font, (w / 2, h * 0.52 + 20 * i))
+
+            self._draw_button_box(L["start_box"], "Start", enabled=ready)
+
+            # Test button: tucked in the corner, with a warning.
+            tx, ty, tw, th = L["test_box"]
+            self._draw_text("FOR TESTING ONLY - DO NOT PRESS", self.small_font,
+                            (tx + tw / 2, ty - 14), color=pygame.Color("red"))
+            self._draw_button_box(L["test_box"], "Test: ON" if self.test_mode else "Test: OFF",
+                                  font=self.small_font, color=pygame.Color("red"))
+            if self.test_mode:
+                sx, sy, sw, sh = L["start_box"]
+                self._draw_text(f"TEST MODE ENABLED ({TEST_STIMULI_COUNT} clips, break every {TEST_BREAK_INTERVAL} pairs)", self.small_font,
+                                (sx + sw / 2, sy + sh + 25), color=pygame.Color("red"))
             return
 
         total = len(info.stimuli)
@@ -307,13 +390,14 @@ class SimilarityTest:
             image = self._get_button_image("pause" if playing else "play", L["button_size"])
             self.screen.blit(image, L[f"button_{side}"])
 
-        instructions = (
+        for i, line in enumerate([
             "Click the play buttons to listen to the stimuli.",
+            "You can listen to each stimuli as many times as you feel necessary.",
             "Move the slider on the right based on the stimuli's dissimilarity.",
-            "Click next when complete. Try to use the full range of the scale.",
-        )
-        for i, line in enumerate(instructions):
-            self._draw_text(line, self.small_font, (20, 20 + 25 * i), anchor="topleft")
+            "Try to use the full range of the scale through the experiment.",
+            "When done, a next button appears. Once pressed, you cannot go back. Click next when ready.",
+        ]):
+            self._draw_text(line, self.small_font, ((L["button_A"][0] + L["button_B"][0] + L["button_size"]) / 2, L["h"] * 0.15 + 20 * i))
 
         self._draw_text(str(info.pair_number), self.pair_font, (20, L["h"] - 20), anchor="bottomleft")
 
@@ -362,10 +446,17 @@ class SimilarityTest:
         self._closed = True
         if not self._done:
             self.save()
+        if self._tk_root is not None:
+            try:
+                self._tk_root.destroy()
+            except Exception:
+                pass
         pygame.quit()
         sys.exit(0)
 
     def save(self):
+        if self.output_path is None:
+            return
         # stimuli saved in alphabetical order
         matrix = np.round(self.game.gameInfo.similarityArray, 2)
         np.savetxt(self.output_path, matrix, fmt="%.2f", delimiter=" ")
