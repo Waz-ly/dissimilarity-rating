@@ -1,0 +1,53 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+            sep: ";"
+          - os: macos-latest
+            name: macOS-AppleSilicon
+            sep: ":"
+          - os: macos-15-intel
+            name: macOS-Intel
+            sep: ":"
+          - os: ubuntu-latest
+            name: Linux
+            sep: ":"
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Linux tkinter
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build
+        run: >
+          pyinstaller --clean --windowed
+          --add-data "assets${{ matrix.sep }}assets"
+          --add-data "sounds${{ matrix.sep }}sounds"
+          --name DissimilarityTest main.py
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: DissimilarityTest-${{ matrix.name }}
+          path: dist/
